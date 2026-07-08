@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>汇率数据看板</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="data.js" id="dataScript"></script>
+  <style>
+    :root {
+      --bg: #f0f4f8;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #1a202c;
+      --muted: #64748b;
+      --primary: #1e3a5f;
+      --primary-light: #2c5282;
+      --accent: #3182ce;
+      --accent-2: #38a169;
+      --accent-3: #d69e2e;
+      --up: #e53e3e;
+      --down: #38a169;
+      --shadow: 0 4px 24px rgba(30, 58, 95, 0.08);
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.35;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+      color: #fff;
+      padding: 0.45rem 1rem;
+      box-shadow: 0 2px 8px rgba(30, 58, 95, 0.2);
+      flex-shrink: 0;
+    }
+    .topbar-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .topbar h1 { font-size: 1.05rem; font-weight: 600; }
+    .topbar p { font-size: 0.72rem; opacity: 0.85; display: none; }
+    .topbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      align-items: center;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.28rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.35);
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: rgba(255,255,255,0.22); }
+    .btn input[type="file"] { display: none; }
+    .page {
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0.4rem 0.65rem 0.35rem;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      overflow: hidden;
+    }
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    #sectionTrend {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .section-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      padding: 0.35rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      background: #fafbfc;
+      flex-shrink: 0;
+    }
+    .section-head h2 {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .section-head h2::before {
+      content: "";
+      width: 3px;
+      height: 0.95em;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem 0.5rem;
+      font-size: 0.72rem;
+    }
+    .filter-row label { color: var(--muted); white-space: nowrap; }
+    .filter-row input[type="date"],
+    .filter-row select {
+      padding: 0.2rem 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font-size: 0.72rem;
+      color: var(--text);
+      background: #fff;
+    }
+    .section-body { padding: 0.45rem 0.55rem; }
+    #sectionTrend .section-body {
+      flex: 1;
+      min-height: 0;
+      padding: 0.35rem 0.45rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .rate-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.4rem;
+    }
+    .rate-card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.45rem 0.55rem;
+      background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    .rate-card::after {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--card-accent, var(--accent));
+    }
+    .rate-card[data-key="usdCny"] { --card-accent: #3182ce; }
+    .rate-card[data-key="cnyIdr"] { --card-accent: #38a169; }
+    .rate-card[data-key="usdIdr"] { --card-accent: #d69e2e; }
+    .rate-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.25rem;
+    }
+    .rate-title { font-size: 0.7rem; color: var(--muted); font-weight: 500; }
+    .rate-main {
+      display: flex;
+      align-items: baseline;
+      gap: 0.35rem;
+      margin-top: 0.15rem;
+    }
+    .rate-value {
+      font-size: 1.15rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--primary);
+      line-height: 1.1;
+    }
+    .rate-unit { font-size: 0.65rem; color: var(--muted); }
+    .stats-list {
+      margin-top: 0.35rem;
+      padding-top: 0.35rem;
+      border-top: 1px dashed var(--border);
+      display: grid;
+      gap: 0.2rem;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.68rem;
+      gap: 0.35rem;
+    }
+    .stat-row span:first-child { color: var(--muted); flex-shrink: 0; }
+    .stat-row span:last-child {
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .stat-row .up { color: var(--up); }
+    .stat-row .down { color: var(--down); }
+    .stat-row .flat { color: var(--muted); }
+    .stat-row.compact span:last-child { font-size: 0.65rem; font-weight: 500; }
+    .ref-lines-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.2rem;
+      margin-top: 0.3rem;
+      padding-top: 0.3rem;
+      border-top: 1px dashed var(--border);
+    }
+    .ref-chip {
+      font-size: 0.62rem;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .ref-chip.tp { background: #c6f6d5; color: #276749; }
+    .ref-chip.watch { background: #fefcbf; color: #975a16; }
+    .ref-chip.sl { background: #fed7d7; color: #c53030; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.35rem;
+      flex: 1;
+      min-height: 0;
+    }
+    .chart-wrap {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.25rem 0.2rem 0;
+      background: #fafbfc;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .chart-wrap h3 {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--primary);
+      padding: 0 0.25rem 0.1rem;
+      flex-shrink: 0;
+    }
+    .chart-box { width: 100%; flex: 1; min-height: 0; }
+    .error-banner {
+      display: none;
+      background: #fff5f5;
+      border: 1px solid #feb2b2;
+      color: #c53030;
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+    .error-banner.visible { display: block; }
+    footer {
+      display: none;
+    }
+    .meta-tag {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.68rem;
+      margin-left: 0.35rem;
+      font-weight: 400;
+    }
+    .signal-badge {
+      display: inline-block;
+      padding: 0.08rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.62rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .signal-tp { background: #c6f6d5; color: #276749; }
+    .signal-watch { background: #fefcbf; color: #975a16; }
+    .signal-sl { background: #fed7d7; color: #c53030; }
+    @media (max-width: 768px) {
+      html, body { overflow: auto; height: auto; }
+      body { display: block; }
+      .page { overflow: visible; }
+      .rate-grid, .charts-grid { grid-template-columns: 1fr; }
+      .chart-box { min-height: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <h1>汇率数据看板<span class="meta-tag" id="dataMeta">加载中…</span></h1>
+      </div>
+      <div class="topbar-actions">
+        <label class="btn">
+          导入 Excel
+          <input type="file" id="fileInput" accept=".xlsx,.xls" />
+        </label>
+        <button type="button" class="btn" id="btnReload" title="重新读取 data.js，并清除浏览器旧缓存">重新加载</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <div id="errorBanner" class="error-banner"></div>
+
+    <!-- 板块一：每日汇率 -->
+    <section class="section" id="sectionDaily">
+      <div class="section-head">
+        <h2>每日汇率</h2>
+        <div class="filter-row">
+          <label for="dailyDate">选择日期</label>
+          <input type="date" id="dailyDate" />
+        </div>
+      </div>
+      <div class="section-body">
+        <div class="rate-grid" id="rateGrid"></div>
+      </div>
+    </section>
+
+    <!-- 板块二：近30天趋势 -->
+    <section class="section" id="sectionTrend">
+      <div class="section-head">
+        <h2>汇率波动趋势</h2>
+        <div class="filter-row">
+          <label for="trendStart">起始</label>
+          <input type="date" id="trendStart" />
+          <label for="trendEnd">截止</label>
+          <input type="date" id="trendEnd" />
+          <select id="trendPreset" title="快捷周期">
+            <option value="30">近 30 天</option>
+            <option value="60">近 60 天</option>
+            <option value="90">近 90 天</option>
+            <option value="all">全部</option>
+          </select>
+        </div>
+      </div>
+      <div class="section-body">
+        <div class="charts-grid">
+          <div class="chart-wrap">
+            <h3>美元兑人民币</h3>
+            <div id="chartUsdCny" class="chart-box"></div>
+          </div>
+          <div class="chart-wrap">
+            <h3>人民币兑印尼盾</h3>
+            <div id="chartCnyIdr" class="chart-box"></div>
+          </div>
+          <div class="chart-wrap">
+            <h3>美元兑印尼盾</h3>
+            <div id="chartUsdIdr" class="chart-box"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>汇率数据看板 · 数据随 data.js 更新 · 支持导入 Excel</footer>
+  </main>
+
+  <script>
+    const METRICS = [
+      { key: "usdCny", title: "美元兑人民币", unit: "1 USD = ? CNY", color: "#3182ce", chartId: "chartUsdCny", decimals: 4 },
+      { key: "cnyIdr", title: "人民币兑印尼盾", unit: "1 CNY = ? IDR", color: "#38a169", chartId: "chartCnyIdr", decimals: 2 },
+      { key: "usdIdr", title: "美元兑印尼盾", unit: "1 USD = ? IDR", color: "#d69e2e", chartId: "chartUsdIdr", decimals: 2 }
+    ];
+
+    const LINE_TYPES = [
+      { key: "takeProfit", label: "止盈线", color: "#38a169", solid: true },
+      { key: "watch", label: "观望线", color: "#d69e2e", solid: false },
+      { key: "stopLoss", label: "止损线", color: "#e53e3e", solid: true }
+    ];
+
+    let allData = [];
+    let charts = {};
+    let thresholds = {};
+
+    function showError(msg) {
+      const el = document.getElementById("errorBanner");
+      el.textContent = msg;
+      el.classList.add("visible");
+    }
+    function clearError() {
+      document.getElementById("errorBanner").classList.remove("visible");
+    }
+
+    function excelSerialToIso(n) {
+      const base = new Date(1899, 11, 30);
+      const d = new Date(base.getTime() + n * 86400000);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function parseDate(val) {
+      if (val == null || val === "") return null;
+      if (typeof val === "number" && val > 30000 && val < 60000) return excelSerialToIso(val);
+      const s = String(val).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const m = s.match(/^(\d{4})[年\/\-.](\d{1,2})[月\/\-.](\d{1,2})/);
+      if (m) return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+      const d = new Date(s);
+      if (!isNaN(d)) return d.toISOString().slice(0, 10);
+      return null;
+    }
+
+    function toNum(val) {
+      if (val == null || val === "") return null;
+      const n = typeof val === "number" ? val : parseFloat(String(val).replace(/,/g, ""));
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function isHeaderRow(row) {
+      const first = String(row[0] ?? "").trim();
+      if (parseDate(row[0])) return false;
+      if (/日期|date/i.test(first)) return true;
+      const joined = row.map((c) => String(c ?? "")).join(" ");
+      return /汇率|美元|人民币|印尼/.test(joined) && !parseDate(row[0]);
+    }
+
+    function rowsToRecords(rows) {
+      const out = [];
+      for (const row of rows) {
+        if (!row || row.every((c) => c == null || String(c).trim() === "")) continue;
+        if (isHeaderRow(row)) continue;
+        const date = parseDate(row[0]);
+        const usdCny = toNum(row[1]);
+        const cnyIdr = toNum(row[2]);
+        const usdIdr = toNum(row[3]);
+        if (!date || usdCny == null) continue;
+        out.push({ date, usdCny, cnyIdr, usdIdr });
+      }
+      return out.sort((a, b) => a.date.localeCompare(b.date));
+    }
+
+    function parseXlsxBuffer(buf) {
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+      return rowsToRecords(rows);
+    }
+
+    function formatRate(val, decimals) {
+      if (val == null) return "—";
+      return val.toLocaleString("zh-CN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    }
+
+    function monthKey(dateStr) {
+      return dateStr.slice(0, 7);
+    }
+
+    function getRecordByDate(dateStr) {
+      return allData.find((r) => r.date === dateStr);
+    }
+
+    function prevTradingDay(dateStr) {
+      const idx = allData.findIndex((r) => r.date === dateStr);
+      if (idx > 0) return allData[idx - 1];
+      return null;
+    }
+
+    function monthRecords(dateStr) {
+      const mk = monthKey(dateStr);
+      return allData.filter((r) => r.date.startsWith(mk));
+    }
+
+    function calcChange(curr, prev) {
+      if (curr == null || prev == null) return { abs: null, pct: null };
+      const abs = curr - prev;
+      const pct = prev !== 0 ? (abs / prev) * 100 : null;
+      return { abs, pct };
+    }
+
+    function changeClass(v) {
+      if (v == null || Math.abs(v) < 1e-10) return "flat";
+      return v > 0 ? "up" : "down";
+    }
+
+    function formatChange(change, decimals) {
+      if (change.abs == null) return { text: "—", cls: "flat" };
+      const sign = change.abs >= 0 ? "+" : "";
+      const absStr = `${sign}${change.abs.toFixed(decimals)}`;
+      const pctStr = change.pct != null ? ` (${sign}${change.pct.toFixed(2)}%)` : "";
+      return { text: absStr + pctStr, cls: changeClass(change.abs) };
+    }
+
+    function monthStats(records, key) {
+      const vals = records.map((r) => r[key]).filter((v) => v != null);
+      if (!vals.length) return { avg: null, max: null, min: null };
+      const sum = vals.reduce((a, b) => a + b, 0);
+      return { avg: sum / vals.length, max: Math.max(...vals), min: Math.min(...vals) };
+    }
+
+    function calcDefaultThresholds(records, key) {
+      const recent = records.slice(-30);
+      const vals = recent.map((r) => r[key]).filter((v) => v != null);
+      if (!vals.length) {
+        return { takeProfit: "", watch: "", stopLoss: "" };
+      }
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return { takeProfit: max, watch: avg, stopLoss: min };
+    }
+
+    function initThresholds() {
+      thresholds = {};
+      METRICS.forEach((m) => {
+        thresholds[m.key] = calcDefaultThresholds(allData, m.key);
+      });
+    }
+
+    function getThreshold(metricKey, lineKey) {
+      const v = thresholds[metricKey]?.[lineKey];
+      return v == null || v === "" ? null : Number(v);
+    }
+
+    function signalStatus(value, metricKey) {
+      if (value == null) return { label: "—", cls: "" };
+      const tp = getThreshold(metricKey, "takeProfit");
+      const sl = getThreshold(metricKey, "stopLoss");
+      if (tp != null && value >= tp) return { label: "止盈区", cls: "signal-tp" };
+      if (sl != null && value <= sl) return { label: "止损区", cls: "signal-sl" };
+      return { label: "观望区", cls: "signal-watch" };
+    }
+
+    function buildMarkLines(metricKey, decimals) {
+      const data = LINE_TYPES.map((line) => {
+        const y = getThreshold(metricKey, line.key);
+        if (y == null || Number.isNaN(y)) return null;
+        return {
+          yAxis: y,
+          name: line.label,
+          lineStyle: {
+            color: line.color,
+            width: 2,
+            type: line.solid ? "solid" : "dashed"
+          },
+          label: {
+            show: true,
+            formatter: line.label.replace("线", ""),
+            color: line.color,
+            fontSize: 8,
+            position: "insideEndTop"
+          }
+        };
+      }).filter(Boolean);
+      if (!data.length) return undefined;
+      return { symbol: "none", silent: true, data };
+    }
+
+    function renderDaily() {
+      const dateInput = document.getElementById("dailyDate");
+      const selected = dateInput.value || (allData.length ? allData[allData.length - 1].date : "");
+      if (!selected) return;
+
+      const curr = getRecordByDate(selected);
+      const prev = prevTradingDay(selected);
+      const monthRecs = monthRecords(selected);
+
+      const grid = document.getElementById("rateGrid");
+      grid.innerHTML = METRICS.map((m) => {
+        const val = curr?.[m.key];
+        const prevVal = prev?.[m.key];
+        const ch = calcChange(val, prevVal);
+        const chFmt = formatChange(ch, m.decimals);
+        const ms = monthStats(monthRecs, m.key);
+        const signal = signalStatus(val, m.key);
+        const tp = getThreshold(m.key, "takeProfit");
+        const watch = getThreshold(m.key, "watch");
+        const sl = getThreshold(m.key, "stopLoss");
+
+        return `<article class="rate-card" data-key="${m.key}">
+          <div class="rate-head">
+            <span class="rate-title">${m.title}</span>
+            ${signal.cls ? `<span class="signal-badge ${signal.cls}">${signal.label}</span>` : ""}
+          </div>
+          <div class="rate-main">
+            <span class="rate-value">${formatRate(val, m.decimals)}</span>
+            <span class="rate-unit">${m.unit}</span>
+          </div>
+          <div class="stats-list">
+            <div class="stat-row">
+              <span>较昨日</span>
+              <span class="${chFmt.cls}">${chFmt.text}</span>
+            </div>
+            <div class="stat-row compact">
+              <span>本月</span>
+              <span>均 ${formatRate(ms.avg, m.decimals)} · 高 ${formatRate(ms.max, m.decimals)} · 低 ${formatRate(ms.min, m.decimals)}</span>
+            </div>
+          </div>
+          <div class="ref-lines-row">
+            <span class="ref-chip tp">止盈 ${formatRate(tp, m.decimals)}</span>
+            <span class="ref-chip watch">观望 ${formatRate(watch, m.decimals)}</span>
+            <span class="ref-chip sl">止损 ${formatRate(sl, m.decimals)}</span>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    function filterTrendData() {
+      const start = document.getElementById("trendStart").value;
+      const end = document.getElementById("trendEnd").value;
+      return allData.filter((r) => {
+        if (start && r.date < start) return false;
+        if (end && r.date > end) return false;
+        return true;
+      });
+    }
+
+    function applyTrendPreset(days) {
+      if (!allData.length) return;
+      const end = allData[allData.length - 1].date;
+      document.getElementById("trendEnd").value = end;
+      if (days === "all") {
+        document.getElementById("trendStart").value = allData[0].date;
+      } else {
+        const endDate = new Date(end);
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - Number(days) + 1);
+        const start = startDate.toISOString().slice(0, 10);
+        document.getElementById("trendStart").value =
+          start < allData[0].date ? allData[0].date : start;
+      }
+      renderTrend();
+    }
+
+    function baseLineOption(title, color) {
+      return {
+        backgroundColor: "transparent",
+        grid: { left: 42, right: 36, top: 22, bottom: 28 },
+        tooltip: {
+          trigger: "axis",
+          backgroundColor: "rgba(255,255,255,0.96)",
+          borderColor: "#e2e8f0",
+          textStyle: { color: "#1a202c", fontSize: 11 }
+        },
+        xAxis: {
+          type: "category",
+          boundaryGap: false,
+          axisLabel: { color: "#64748b", fontSize: 9, rotate: 25, interval: "auto" },
+          axisLine: { lineStyle: { color: "#e2e8f0" } }
+        },
+        yAxis: {
+          type: "value",
+          scale: true,
+          splitLine: { lineStyle: { color: "#edf2f7", type: "dashed" } },
+          axisLabel: { color: "#64748b", fontSize: 9 }
+        },
+        series: [{
+          type: "line",
+          smooth: true,
+          symbol: "circle",
+          symbolSize: 3,
+          lineStyle: { width: 2, color },
+          itemStyle: { color },
+          areaStyle: {
+            color: {
+              type: "linear", x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: color + "28" },
+                { offset: 1, color: color + "04" }
+              ]
+            }
+          }
+        }]
+      };
+    }
+
+    function resizeCharts() {
+      requestAnimationFrame(() => {
+        Object.values(charts).forEach((c) => c.resize());
+      });
+    }
+
+    function renderTrend() {
+      const rows = filterTrendData();
+      METRICS.forEach((m) => {
+        const chart = charts[m.chartId];
+        if (!chart) return;
+        const dates = rows.map((r) => r.date);
+        const values = rows.map((r) => r[m.key]);
+        const markLine = buildMarkLines(m.key, m.decimals);
+        const series = {
+          ...baseLineOption(m.title, m.color).series[0],
+          data: values,
+          name: m.title
+        };
+        if (markLine) series.markLine = markLine;
+        chart.setOption({
+          ...baseLineOption(m.title, m.color),
+          xAxis: { ...baseLineOption(m.title, m.color).xAxis, data: dates },
+          series: [series]
+        }, true);
+      });
+      resizeCharts();
+    }
+
+    function setupDateInputs() {
+      if (!allData.length) return;
+      const min = allData[0].date;
+      const max = allData[allData.length - 1].date;
+      ["dailyDate", "trendStart", "trendEnd"].forEach((id) => {
+        const el = document.getElementById(id);
+        el.min = min;
+        el.max = max;
+      });
+      document.getElementById("dailyDate").value = max;
+      applyTrendPreset(30);
+      document.getElementById("dataMeta").textContent =
+        `${allData.length} 个交易日 · ${min} 至 ${max}`;
+    }
+
+    function initCharts() {
+      METRICS.forEach((m) => {
+        charts[m.chartId] = echarts.init(document.getElementById(m.chartId));
+      });
+      window.addEventListener("resize", resizeCharts);
+    }
+
+    function setData(records) {
+      if (!records?.length) throw new Error("没有可用数据");
+      allData = records;
+      initThresholds();
+      setupDateInputs();
+      renderDaily();
+      renderTrend();
+      clearError();
+      resizeCharts();
+      try {
+        localStorage.setItem("fx_dashboard_v2", JSON.stringify(records));
+      } catch (_) {}
+    }
+
+    function lastRecordDate(records) {
+      if (!records?.length) return "";
+      return records[records.length - 1].date || "";
+    }
+
+    function loadFromScript() {
+      if (Array.isArray(window.EXCHANGE_RATES) && window.EXCHANGE_RATES.length) {
+        return window.EXCHANGE_RATES.slice().sort((a, b) => a.date.localeCompare(b.date));
+      }
+      return null;
+    }
+
+    function loadFromCache() {
+      try {
+        const cached = localStorage.getItem("fx_dashboard_v2");
+        if (!cached) return null;
+        const parsed = JSON.parse(cached);
+        if (parsed?.length && parsed[0].usdCny != null) return parsed;
+      } catch (_) {}
+      return null;
+    }
+
+    /** 优先使用 data.js（转换脚本生成），仅当缓存更新时才用缓存 */
+    function loadInitial() {
+      const fromFile = loadFromScript();
+      const fromCache = loadFromCache();
+      if (fromFile && fromCache) {
+        const fileLast = lastRecordDate(fromFile);
+        const cacheLast = lastRecordDate(fromCache);
+        if (fileLast >= cacheLast) return fromFile;
+        return fromCache;
+      }
+      return fromFile || fromCache || null;
+    }
+
+    function reloadDataScript() {
+      return new Promise((resolve, reject) => {
+        const old = document.getElementById("dataScript");
+        const script = document.createElement("script");
+        script.id = "dataScript";
+        script.src = "data.js?t=" + Date.now();
+        script.onload = () => {
+          if (old?.parentNode) old.remove();
+          resolve(loadFromScript());
+        };
+        script.onerror = () => reject(new Error("无法加载 data.js"));
+        document.head.appendChild(script);
+      });
+    }
+
+    document.getElementById("dailyDate").addEventListener("change", renderDaily);
+
+    document.getElementById("trendStart").addEventListener("change", () => {
+      document.getElementById("trendPreset").value = "";
+      renderTrend();
+    });
+    document.getElementById("trendEnd").addEventListener("change", () => {
+      document.getElementById("trendPreset").value = "";
+      renderTrend();
+    });
+    document.getElementById("trendPreset").addEventListener("change", (e) => {
+      applyTrendPreset(e.target.value);
+    });
+
+    document.getElementById("fileInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const buf = await file.arrayBuffer();
+        const records = parseXlsxBuffer(buf);
+        if (!records.length) throw new Error("未能解析 Excel，请确认：第1列日期，第2–4列为三种汇率");
+        setData(records);
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    document.getElementById("btnReload").addEventListener("click", async () => {
+      clearError();
+      localStorage.removeItem("fx_dashboard_v2");
+      try {
+        const fresh = await reloadDataScript();
+        if (fresh?.length) {
+          setData(fresh);
+          return;
+        }
+      } catch (_) {}
+      const initial = loadInitial();
+      if (initial?.length) {
+        setData(initial);
+      } else {
+        showError("暂无数据。请先运行 python import_rates.py 或「一键转换.bat」，再点「重新加载」。");
+      }
+    });
+
+    async function main() {
+      if (typeof echarts === "undefined") {
+        showError("ECharts 加载失败，请检查网络连接");
+        return;
+      }
+      initCharts();
+      try {
+        const fresh = await reloadDataScript();
+        if (fresh?.length) {
+          setData(fresh);
+          return;
+        }
+      } catch (_) {}
+      const initial = loadInitial();
+      if (initial?.length) {
+        try {
+          setData(initial);
+        } catch (err) {
+          showError("数据格式异常：" + err.message);
+        }
+      } else {
+        showError(
+          "暂无数据。请将 d:\\汇率.xlsx 放在 D 盘根目录，双击运行「一键转换.bat」，或点击顶部「导入 Excel」手动选择文件。"
+        );
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
