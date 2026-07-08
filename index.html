@@ -271,6 +271,17 @@
       flex-shrink: 0;
     }
     .error-banner.visible { display: block; }
+    .live-tag {
+      display: inline-block;
+      background: rgba(56, 161, 105, 0.25);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      margin-left: 0.35rem;
+      font-weight: 400;
+    }
+    .live-tag.stale { background: rgba(214, 158, 46, 0.25); }
+    .live-tag.error { background: rgba(229, 62, 62, 0.25); }
     footer {
       display: none;
     }
@@ -307,14 +318,15 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div>
-        <h1>汇率数据看板<span class="meta-tag" id="dataMeta">加载中…</span></h1>
+        <h1>汇率数据看板<span class="meta-tag" id="dataMeta">加载中…</span><span class="live-tag" id="liveMeta"></span></h1>
       </div>
       <div class="topbar-actions">
         <label class="btn">
           导入 Excel
           <input type="file" id="fileInput" accept=".xlsx,.xls" />
         </label>
-        <button type="button" class="btn" id="btnReload" title="重新读取 data.js，并清除浏览器旧缓存">重新加载</button>
+        <button type="button" class="btn" id="btnLive" title="从新浪财经拉取最新汇率">刷新实时汇率</button>
+        <button type="button" class="btn" id="btnReload" title="重新读取 data.js">重新加载</button>
       </div>
     </div>
   </header>
@@ -371,7 +383,7 @@
       </div>
     </section>
 
-    <footer>汇率数据看板 · 数据随 data.js 更新 · 支持导入 Excel</footer>
+    <footer>汇率数据看板 · 支持实时刷新 · 每 5 分钟自动更新</footer>
   </main>
 
   <script>
@@ -390,6 +402,102 @@
     let allData = [];
     let charts = {};
     let thresholds = {};
+    let liveTimer = null;
+    const SINA_CODES = {
+      usdCny: { code: "fx_susdcny", field: 8 },
+      usdIdr: { code: "fx_susdidr", field: 8 },
+      cnyIdr: { code: "fx_scnyidr", field: 8 }
+    };
+    const AUTO_REFRESH_MS = 5 * 60 * 1000;
+
+    function setLiveMeta(text, state) {
+      const el = document.getElementById("liveMeta");
+      el.textContent = text || "";
+      el.className = "live-tag" + (state ? " " + state : "");
+      el.style.display = text ? "inline-block" : "none";
+    }
+
+    function parseSinaField(raw, fieldIndex) {
+      if (!raw) return null;
+      const parts = String(raw).split(",");
+      const val = (parts[fieldIndex] ?? "").trim();
+      if (!val) return null;
+      const n = parseFloat(val);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function loadSinaScripts(codes) {
+      return new Promise((resolve, reject) => {
+        const list = [...new Set(codes)].join(",");
+        const script = document.createElement("script");
+        script.charset = "gb2312";
+        script.src = "https://hq.sinajs.cn/list=" + list;
+        script.onload = () => { script.remove(); resolve(); };
+        script.onerror = () => { script.remove(); reject(new Error("无法连接新浪财经")); };
+        document.head.appendChild(script);
+      });
+    }
+
+    async function fetchLiveFromSina() {
+      const codes = Object.values(SINA_CODES).map((c) => c.code);
+      await loadSinaScripts(codes);
+      const row = { date: new Date().toISOString().slice(0, 10) };
+      for (const [key, cfg] of Object.entries(SINA_CODES)) {
+        row[key] = parseSinaField(window["hq_str_" + cfg.code], cfg.field);
+      }
+      if (row.usdCny == null) throw new Error("未能解析在岸人民币汇率");
+      row.updatedAt = new Date().toLocaleString("zh-CN");
+      return row;
+    }
+
+    function mergeLiveRow(row) {
+      if (!row?.date || row.usdCny == null) return false;
+      const idx = allData.findIndex((r) => r.date === row.date);
+      const merged = {
+        date: row.date,
+        usdCny: row.usdCny,
+        cnyIdr: row.cnyIdr ?? null,
+        usdIdr: row.usdIdr ?? null
+      };
+      if (idx >= 0) allData[idx] = { ...allData[idx], ...merged };
+      else allData.push(merged);
+      allData.sort((a, b) => a.date.localeCompare(b.date));
+      return true;
+    }
+
+    async function refreshLiveRates(options = {}) {
+      const { silent = false } = options;
+      const btn = document.getElementById("btnLive");
+      if (!silent) {
+        btn.disabled = true;
+        btn.textContent = "刷新中…";
+      }
+      try {
+        const row = await fetchLiveFromSina();
+        mergeLiveRow(row);
+        initThresholds();
+        setupDateInputs();
+        renderDaily();
+        renderTrend();
+        setLiveMeta("实时 · " + row.updatedAt, "");
+        clearError();
+        return true;
+      } catch (err) {
+        setLiveMeta("实时失败", "error");
+        if (!silent) showError("实时汇率获取失败：" + err.message);
+        return false;
+      } finally {
+        if (!silent) {
+          btn.disabled = false;
+          btn.textContent = "刷新实时汇率";
+        }
+      }
+    }
+
+    function scheduleLiveRefresh() {
+      if (liveTimer) clearInterval(liveTimer);
+      liveTimer = setInterval(() => refreshLiveRates({ silent: true }), AUTO_REFRESH_MS);
+    }
 
     function showError(msg) {
       const el = document.getElementById("errorBanner");
@@ -823,6 +931,8 @@
       }
     });
 
+    document.getElementById("btnLive").addEventListener("click", () => refreshLiveRates({ silent: false }));
+
     document.getElementById("btnReload").addEventListener("click", async () => {
       clearError();
       localStorage.removeItem("fx_dashboard_v2");
@@ -837,7 +947,7 @@
       if (initial?.length) {
         setData(initial);
       } else {
-        showError("暂无数据。请先运行 python import_rates.py 或「一键转换.bat」，再点「重新加载」。");
+        showError("暂无数据。请点「刷新实时汇率」或导入 Excel。");
       }
     });
 
@@ -849,22 +959,22 @@
       initCharts();
       try {
         const fresh = await reloadDataScript();
-        if (fresh?.length) {
-          setData(fresh);
-          return;
-        }
-      } catch (_) {}
-      const initial = loadInitial();
-      if (initial?.length) {
-        try {
-          setData(initial);
-        } catch (err) {
-          showError("数据格式异常：" + err.message);
-        }
+        if (fresh?.length) setData(fresh);
+      } catch (_) {
+        const initial = loadInitial();
+        if (initial?.length) setData(initial);
+      }
+      if (!allData.length) {
+        const initial = loadInitial();
+        if (initial?.length) setData(initial);
+      }
+      if (allData.length) {
+        await refreshLiveRates({ silent: true });
+        scheduleLiveRefresh();
       } else {
-        showError(
-          "暂无数据。请将 d:\\汇率.xlsx 放在 D 盘根目录，双击运行「一键转换.bat」，或点击顶部「导入 Excel」手动选择文件。"
-        );
+        showError("暂无历史数据。请点「刷新实时汇率」获取今日汇率。");
+        await refreshLiveRates({ silent: false });
+        if (allData.length) scheduleLiveRefresh();
       }
     }
 

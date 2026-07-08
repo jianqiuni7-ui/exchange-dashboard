@@ -20,7 +20,21 @@ python3 -m http.server 8080
 # 打开 http://127.0.0.1:8080
 ```
 
-## 更新数据后重新发布
+## 实时更新
+
+网页版已内置**浏览器实时刷新**（无需本地 Python 服务）：
+
+- 打开页面自动拉取新浪财经最新汇率
+- 每 **5 分钟**自动刷新
+- 可手动点 **「刷新实时汇率」**
+
+访问地址：
+
+```
+https://jianqiuni7-ui.github.io/exchange-dashboard/
+```
+
+## 更新历史数据后重新发布
 
 在 `~/Desktop/汇率` 目录运行：
 
@@ -28,7 +42,8 @@ python3 -m http.server 8080
 bash 同步发布网页.sh
 ```
 
-然后在 GitHub Desktop 里对 `exchange-dashboard` 仓库 Commit + Push。
+然后在 GitHub Desktop 里 Commit + Push `data.js` 即可。
+
 
 ## GitHub Pages 开启步骤
 
